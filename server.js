@@ -1341,14 +1341,20 @@ function parseBarcodeData(rawData = "") {
         }
     }
 
+    // 🗓️ Helper to format date like 04092004 → 04-09-2004
+    const formatDate = (dateStr = "") => {
+        if (!/^\d{8}$/.test(dateStr)) return dateStr; // only format if exactly 8 digits
+        return dateStr.replace(/(\d{2})(\d{2})(\d{4})/, "$1-$2-$3");
+    };
+
     // 🧾 Step 4: Convert into readable JSON
     return {
         lastName: fields["DCS"] || "",
         firstName: fields["DAC"] || "",
         middleName: fields["DAD"] || "",
-        issueDate: fields["DBD"] || "",
-        dateOfBirth: fields["DBB"] || "",
-        expiryDate: fields["DBA"] || "",
+        issueDate: formatDate(fields["DBD"]) || "",
+        dateOfBirth: formatDate(fields["DBB"]) || "",
+        expiryDate: formatDate(fields["DBA"]) || "",
         genderCode: fields["DBC"] || "",
         height: fields["DAU"] || "",
         eyeColor: fields["DAY"] || "",
