@@ -18,7 +18,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: '*', // Allow all domains (for POC it's fine)
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 app.use(express.static('.'));
 
@@ -1386,67 +1390,67 @@ function parseBarcodeData(rawData = "") {
 
 // ---------- Main Scan Route ----------
 app.post("/scan", upload.single("image"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "No image file provided",
-      });
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "No image file provided",
+            });
+        }
+
+        const imagePath = req.file.path;
+        console.log("📸 Scanning image:", imagePath);
+
+        // Step 1: Scan and parse barcode
+        const result = await scanBarcode(imagePath);
+        const parsedData = parseBarcodeData(result.barcode || "");
+
+        console.log("Parsed Data:", parsedData);
+
+        if (!parsedData || !parsedData.uniqueId) {
+            throw new Error("Invalid or missing unique ID in parsed data");
+        }
+
+        // Step 2: Check if license already exists
+        let license = await License.findOne({ uniqueId: parsedData.uniqueId });
+
+        if (!license) {
+            // 🆕 New License
+            license = await License.create(parsedData);
+            console.log("✅ New license saved:", license.uniqueId);
+        } else {
+            console.log("🔁 Existing license found:", license.uniqueId);
+        }
+
+        // Step 3: Always create a new Entry for this scan
+        const entry = await Entry.create({
+            tenantModel: license._id,
+        });
+
+        console.log("📝 Entry created for license:", entry._id);
+
+        // Step 4: Clean up file
+        fs.unlinkSync(imagePath);
+
+        // Step 5: Respond
+        res.json({
+            success: true,
+            message: license ? "Scan processed successfully" : "License not found",
+            license,
+            entry,
+        });
+    } catch (error) {
+        console.error("❌ Error in /scan endpoint:", error);
+
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+
+        res.status(500).json({
+            success: false,
+            message: "Internal server error: " + error.message,
+        });
     }
-
-    const imagePath = req.file.path;
-    console.log("📸 Scanning image:", imagePath);
-
-    // Step 1: Scan and parse barcode
-    const result = await scanBarcode(imagePath);
-    const parsedData = parseBarcodeData(result.barcode || "");
-
-    console.log("Parsed Data:", parsedData);
-
-    if (!parsedData || !parsedData.uniqueId) {
-      throw new Error("Invalid or missing unique ID in parsed data");
-    }
-
-    // Step 2: Check if license already exists
-    let license = await License.findOne({ uniqueId: parsedData.uniqueId });
-
-    if (!license) {
-      // 🆕 New License
-      license = await License.create(parsedData);
-      console.log("✅ New license saved:", license.uniqueId);
-    } else {
-      console.log("🔁 Existing license found:", license.uniqueId);
-    }
-
-    // Step 3: Always create a new Entry for this scan
-    const entry = await Entry.create({
-      tenantModel: license._id,
-    });
-
-    console.log("📝 Entry created for license:", entry._id);
-
-    // Step 4: Clean up file
-    fs.unlinkSync(imagePath);
-
-    // Step 5: Respond
-    res.json({
-      success: true,
-      message: license ? "Scan processed successfully" : "License not found",
-      license,
-      entry,
-    });
-  } catch (error) {
-    console.error("❌ Error in /scan endpoint:", error);
-
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Internal server error: " + error.message,
-    });
-  }
 });
 
 
