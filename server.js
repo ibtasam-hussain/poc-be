@@ -8,6 +8,11 @@ const jsQR = require('jsqr');
 const Jimp = require('jimp');
 const axios = require('axios');
 const FormData = require('form-data');
+const connectDB = require('./src/configs/db.js');
+const License = require('./src/models/tenant.model.js');
+const Entry = require('./src/models/entries.model.js');
+
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +21,16 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.static('.'));
+
+
+
+//database
+connectDB();
+
+
+//routes
+const tenantRoutes = require('./src/routes/tenant.routes.js');
+app.use('/api', tenantRoutes);
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -1370,49 +1385,71 @@ function parseBarcodeData(rawData = "") {
 
 
 // ---------- Main Scan Route ----------
-app.post('/scan', upload.single('image'), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({
-                success: false,
-                message: 'No image file provided'
-            });
-        }
-
-        const imagePath = req.file.path;
-        console.log('Scanning image:', imagePath);
-
-        // Step 1: Scan for barcode
-        const result = await scanBarcode(imagePath);
-
-        console.log('Raw scan result: barcode = ', result.barcode);
-        // Step 2: Parse using regex
-        const parsedData = parseBarcodeData(result.barcode || '');
-
-        // Step 3: Clean up file
-        fs.unlinkSync(imagePath);
-
-        console.log('Scan result:', result);
-        console.log('Parsed data:', parsedData);
-        res.json({
-            success: true,
-            raw: result.text || result,
-            parsed: parsedData
-        });
-
-    } catch (error) {
-        console.error('Error in scan endpoint:', error);
-
-        if (req.file && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
-        }
-
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error: ' + error.message
-        });
+app.post("/scan", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No image file provided",
+      });
     }
+
+    const imagePath = req.file.path;
+    console.log("📸 Scanning image:", imagePath);
+
+    // Step 1: Scan and parse barcode
+    const result = await scanBarcode(imagePath);
+    const parsedData = parseBarcodeData(result.barcode || "");
+
+    console.log("Parsed Data:", parsedData);
+
+    if (!parsedData || !parsedData.uniqueId) {
+      throw new Error("Invalid or missing unique ID in parsed data");
+    }
+
+    // Step 2: Check if license already exists
+    let license = await License.findOne({ uniqueId: parsedData.uniqueId });
+
+    if (!license) {
+      // 🆕 New License
+      license = await License.create(parsedData);
+      console.log("✅ New license saved:", license.uniqueId);
+    } else {
+      console.log("🔁 Existing license found:", license.uniqueId);
+    }
+
+    // Step 3: Always create a new Entry for this scan
+    const entry = await Entry.create({
+      tenantModel: license._id,
+    });
+
+    console.log("📝 Entry created for license:", entry._id);
+
+    // Step 4: Clean up file
+    fs.unlinkSync(imagePath);
+
+    // Step 5: Respond
+    res.json({
+      success: true,
+      message: license ? "Scan processed successfully" : "License not found",
+      license,
+      entry,
+    });
+  } catch (error) {
+    console.error("❌ Error in /scan endpoint:", error);
+
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Internal server error: " + error.message,
+    });
+  }
 });
+
+
 
 // Serve the HTML file
 app.get('/', (req, res) => {
