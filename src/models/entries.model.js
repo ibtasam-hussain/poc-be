@@ -1,8 +1,10 @@
 const mongoose = require("mongoose");
 
-const entrySchema = new mongoose.Schema({
-    tenantModel: { type: mongoose.Schema.Types.ObjectId, ref: "License", required: true },
+const EntrySchema = new mongoose.Schema({
+    tenant: { type: mongoose.Schema.Types.ObjectId, ref: "Tenant" },
+    unitVisited: String,
+    remarks: String,
     timestamp: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model("Entry", entrySchema);
+module.exports = mongoose.model("Entry", EntrySchema);

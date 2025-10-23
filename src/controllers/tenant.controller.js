@@ -1,129 +1,68 @@
-const License = require('../models/tenant.model'); // make sure path is correct
-const Entry = require('../models/entries.model');
+const Tenant = require("../models/tenant.model");
+const Entry = require("../models/entries.model");
 
-// GET /api/scan?search=jasso&page=1&limit=10
-exports.getScannedDocs = async (req, res) => {
+
+
+// GET /api/profile/:id
+exports.getTenantProfile = async (req, res) => {
   try {
-    const { search = '', page = 1, limit = 10 } = req.query;
+    const { id } = req.params;
+    const tenant = await Tenant.findById(id).lean();
+    if (!tenant) return res.status(404).json({ success: false, message: "Tenant not found" });
 
-    // Convert to integers
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const visits = await Entry.find({ tenant: id }).lean();
 
-    // Build search filter (case-insensitive)
-    const query = search
-      ? {
-          $or: [
-            { firstName: { $regex: search, $options: 'i' } },
-            { lastName: { $regex: search, $options: 'i' } },
-            { uniqueId: { $regex: search, $options: 'i' } },
-            { state: { $regex: search, $options: 'i' } },
-            { city: { $regex: search, $options: 'i' } },
-          ],
-        }
-      : {};
-
-    // Count total results
-    const total = await License.countDocuments(query);
-
-    // Fetch paginated results (latest first)
-    const data = await License.find(query)
-      .sort({ createdAt: -1 })
-      .skip((pageNum - 1) * limitNum)
-      .limit(limitNum)
-      .lean();
+    const totalVisits = visits.length;
+    const visitedUnits = [...new Set(visits.map((v) => v.unitVisited))];
+    const remarks = visits.map((v) => v.remarks).filter(Boolean);
 
     res.json({
       success: true,
-      data,
-      pagination: {
-        total,
-        page: pageNum,
-        limit: limitNum,
-        totalPages: Math.ceil(total / limitNum),
+      data: {
+        tenant,
+        totalVisits,
+        visitedUnits,
+        remarks,
+        status: tenant.status,
       },
     });
   } catch (error) {
-    console.error('❌ Error fetching scanned entries:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch scanned entries: ' + error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-
-// GET /api/entries?search=jasso&page=1&limit=10
-exports.getEntries = async (req, res) => {
+// GET /api/units
+exports.getUnitsGrid = async (req, res) => {
   try {
-    const { search = "", page = 1, limit = 10 } = req.query;
+    const units = Array.from({ length: 1921 - 101 + 1 }, (_, i) => ({
+      unitNumber: 101 + i,
+      tenantHistory: [], // placeholder
+    }));
 
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    res.json({ success: true, units });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
-    // 🕵️ Search by license info (joined collection)
-    let matchStage = {};
-    if (search) {
-      matchStage = {
-        $or: [
-          { "license.firstName": { $regex: search, $options: "i" } },
-          { "license.lastName": { $regex: search, $options: "i" } },
-          { "license.uniqueId": { $regex: search, $options: "i" } },
-          { "license.state": { $regex: search, $options: "i" } },
-          { "license.city": { $regex: search, $options: "i" } },
-        ],
-      };
-    }
-
-    // 🧾 Use aggregation to join entries with licenses
-    const results = await Entry.aggregate([
-      {
-        $lookup: {
-          from: "licenses", // collection name in MongoDB (usually lowercase + plural)
-          localField: "tenantModel",
-          foreignField: "_id",
-          as: "license",
-        },
-      },
-      { $unwind: "$license" },
-      { $match: matchStage },
-      { $sort: { timestamp: -1 } },
-      { $skip: (pageNum - 1) * limitNum },
-      { $limit: limitNum },
-    ]);
-
-    // Count total (for pagination)
-    const totalCountAgg = await Entry.aggregate([
-      {
-        $lookup: {
-          from: "licenses",
-          localField: "tenantModel",
-          foreignField: "_id",
-          as: "license",
-        },
-      },
-      { $unwind: "$license" },
-      { $match: matchStage },
-      { $count: "total" },
-    ]);
-
-    const total = totalCountAgg[0]?.total || 0;
+// GET /api/dashboard
+exports.getDashboard = async (req, res) => {
+  try {
+    const totalTenants = await Tenant.countDocuments();
+    const totalEntries = await Entry.countDocuments();
 
     res.json({
       success: true,
-      data: results,
-      pagination: {
-        total,
-        page: pageNum,
-        limit: limitNum,
-        totalPages: Math.ceil(total / limitNum),
+      data: {
+        stats: {
+          totalTenants,
+          totalEntries,
+          activeVisitors: 12, // placeholder
+        },
+        searchPlaceholder: "Search by name or unit number...",
       },
     });
   } catch (error) {
-    console.error("❌ Error fetching entries:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch entries: " + error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };

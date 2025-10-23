@@ -1388,7 +1388,7 @@ function parseBarcodeData(rawData = "") {
 
 
 
-// ---------- Main Scan Route ----------
+// ---------- Main Scan Route (Privacy-Safe) ----------
 app.post("/scan", upload.single("image"), async (req, res) => {
     try {
         if (!req.file) {
@@ -1405,39 +1405,58 @@ app.post("/scan", upload.single("image"), async (req, res) => {
         const result = await scanBarcode(imagePath);
         const parsedData = parseBarcodeData(result.barcode || "");
 
-        console.log("Parsed Data:", parsedData);
-
         if (!parsedData || !parsedData.uniqueId) {
             throw new Error("Invalid or missing unique ID in parsed data");
         }
 
-        // Step 2: Check if license already exists
-        let license = await License.findOne({ uniqueId: parsedData.uniqueId });
+        const fullId = parsedData.uniqueId;
+        const idLastFour = fullId.slice(-4);
+        const idHash = require("crypto").createHash("sha256").update(fullId).digest("hex");
+
+        console.log("🔍 Parsed Data:", parsedData);
+
+        const cleanData = {
+            picture: parsedData.picture || null,
+            firstName: parsedData.firstName || "",
+            lastName: parsedData.lastName || "",
+            dob: parsedData.dateOfBirth || null,
+            idLastFour,
+            idHash,
+        };
+
+        // Step 3: Check for existing record by hash
+        let license = await License.findOne({ idHash });
 
         if (!license) {
-            // 🆕 New License
-            license = await License.create(parsedData);
-            console.log("✅ New license saved:", license.uniqueId);
+            license = await License.create(cleanData);
+            console.log("✅ New license saved:", license._id);
         } else {
-            console.log("🔁 Existing license found:", license.uniqueId);
+            console.log("🔁 Existing license found:", license._id);
         }
 
-        // Step 3: Always create a new Entry for this scan
+        // Step 4: Create new Entry (visit)
         const entry = await Entry.create({
-            tenantModel: license._id,
+            tenant: license._id,
         });
 
         console.log("📝 Entry created for license:", entry._id);
 
-        // Step 4: Clean up file
-        fs.unlinkSync(imagePath);
+        // Step 5: Delete uploaded image (optional)
+        if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
 
-        // Step 5: Respond
+        // Step 6: Respond with limited info
         res.json({
             success: true,
-            message: license ? "Scan processed successfully" : "License not found",
-            license,
-            entry,
+            message: "Scan processed successfully",
+            tenant: {
+                _id: license._id,
+                firstName: license.firstName,
+                lastName: license.lastName,
+                dob: license.dob,
+                idLastFour: license.idLastFour,
+                status: license.status,
+            },
+            totalVisits: await Entry.countDocuments({ tenant: license._id }),
         });
     } catch (error) {
         console.error("❌ Error in /scan endpoint:", error);
@@ -1452,6 +1471,7 @@ app.post("/scan", upload.single("image"), async (req, res) => {
         });
     }
 });
+
 
 
 
